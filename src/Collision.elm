@@ -17,15 +17,20 @@ It is very efficient, usually converging in one or two iterations.
 # API
 @docs collision
 
+# Support function
+@docs polySupport
+
 -}
+
+import List as L
+import Maybe exposing (..)
+import Debug
 
 type alias Pt = (Float, Float)
 type alias Mink a = (a, (a -> Pt -> Pt))
 
-unsafeHead (h :: t) = h
-
 {-
- - utility functions on Points 
+ - utility functions on Points
  -}
 dot : Pt -> Pt -> Float
 dot (x1,y1) (x2,y2) = (x1*x2) + (y1*y2)
@@ -47,7 +52,7 @@ neg (x,y) = (-x,-y)
 from : Pt -> Pt -> Pt
 from (ax, ay) (bx, by) = (bx-ax, by-ay)
 
-cross2D : Pt -> Pt -> Float 
+cross2D : Pt -> Pt -> Float
 cross2D (ax, ay) (bx, by) = ax*by - ay*bx
 
 {-
@@ -67,11 +72,30 @@ perp a b = trip a b a
 -- not sure this gets inlined :/
 isSameDirection a b = (dot a b) > 0
 
+{-| This support function is provided for the (probably) common
+case where your object boundary is represented as a list of points
+of the form (Float, Float). It calculates the polygon vertex furthest
+in a direction of a 2D direction vector, also of the form (Float, Float).
+
+    polySupport [(-15,-10),(0,15),(12,-5)] (1,0) == (12,-5)
+    polySupport [(-15,-10),(0,15),(12,-5)] (0,-1) == (-15,-10)
+-}
+polySupport : List Pt -> Pt -> Pt
+polySupport list d =
+    let
+        dotList = L.map (dot d) list
+        decorated = (L.map2 (,)) dotList list
+    in case L.maximum decorated of
+      Just (_, p) -> p
+      Nothing -> Debug.crash
+        "A polygon must have atleast 1 point"
+
+
 {-
  - calculate the support of the Minkowski difference
- - of two Mink's 
+ - of two Mink's
  -}
-calcMinkSupport : Mink a -> Mink b -> (Float, Float) -> (Float,Float) 
+calcMinkSupport : Mink a -> Mink b -> (Float, Float) -> (Float,Float)
 calcMinkSupport (objA, suppA) (objB, suppB) d =
     let
         p1 = suppA objA (neg d)
@@ -95,12 +119,12 @@ getDirectionVector (x1, y1) (x2, y2) =
         --
         -- (u2v3 - u3v2)i - (u1v3 - u3v1)j + (who cares)k = bc x c
         -- so...
-        -- px = (y1*1 - 0*(-y2)),  py = -(x1*1 - 0*(-x2))   
+        -- px = (y1*1 - 0*(-y2)),  py = -(x1*1 - 0*(-x2))
         -- px = y1                 py = -x1
-        -- 
+        --
         -- which is a detailed derivation of the obvious :)
     in
-        if collinear then (y1, -x1) else d 
+        if collinear then (y1, -x1) else d
 
 
 {-| Determine if there is a collision between two objects.
@@ -112,8 +136,8 @@ Pt here is used as an alias for (Float, Float). The first argument
 to collision is max recursion depth, which might come in handy in
 the case where you are writing your own support functions.
 
-    poly1 = [(-15,-10),(0,15),(12,-5)] 
-    poly2 = [(-9,13),(6,13),(-2,22)] 
+    poly1 = [(-15,-10),(0,15),(12,-5)]
+    poly2 = [(-9,13),(6,13),(-2,22)]
 
     collision 10 (poly1, polySupport) (poly2, polySupport) == True
 -}
@@ -122,8 +146,8 @@ collision limit minkA minkB =
     let
         d1 = (1.0, 0.0)
         d2 = neg d1
-        c = calcMinkSupport minkA minkB d1 
-        b = calcMinkSupport minkA minkB d2  
+        c = calcMinkSupport minkA minkB d1
+        b = calcMinkSupport minkA minkB d2
         -- simplex is cb and direction is (cb x c0 x cb)
         cb = from c b
         c0 = neg c
@@ -144,21 +168,21 @@ collision limit minkA minkB =
  - the algorithm finds the component of the triangle closest to the origin (either
  - a 0-simplex or 1-simplex (a point or a line segment), calls that the new working
  - simplex, and proceeds to add a new point to try and construct a new 2-simplex (that
- - new point is always called a, and used as the new point of reference or "origin" so 
+ - new point is always called a, and used as the new point of reference or "origin" so
  - to speak) a is obtained by finding the direction of the origin from the currently
  - building simplex, and finding the extremal point on the boundry in that direction.
  -}
-doSimplex : Int -> Int -> Mink a  -> Mink b -> (List Pt, Pt) -> (Bool, (List Pt, Pt)) 
+doSimplex : Int -> Int -> Mink a  -> Mink b -> (List Pt, Pt) -> (Bool, (List Pt, Pt))
 doSimplex limit depth minkA minkB (sim, d) =
     let
         a = (calcMinkSupport minkA minkB d)
         notPastOrig = ((dot a d) < 0)       -- if not past origin, there is no intersection
-        b = unsafeHead sim
+        b = L.head sim
         (intersects, (newSim, newDir)) = enclosesOrigin a sim
     in
        if | notPastOrig -> (False, ([], (toFloat depth,toFloat depth)))
           | intersects -> (True, (sim, a))
-          | (depth > limit) -> (False, (newSim, newDir)) 
+          | (depth > limit) -> (False, (newSim, newDir))
           | otherwise -> doSimplex limit (depth+1) minkA minkB (newSim, newDir)
 
 
@@ -183,7 +207,7 @@ enclosesOrigin a sim =
 handle0Simplex a b =
     let
         ab = (from a b)   -- line given by adding our new point
-        a0 = neg a        -- direction of a from the origin 
+        a0 = neg a        -- direction of a from the origin
         (newSim, newDir) = if (isSameDirection ab a0) then ([a,b], (perp ab a0)) else ([a], a0)
     in
         (False, (newSim, newDir))
@@ -205,9 +229,5 @@ handle1Simplex a b c =
         if  | (isSameDirection abp a0) -> -- region 4 or 5
                 if (isSameDirection ab a0) then (False, ([a,b], abp)) else (False, ([a], a0))
             | (isSameDirection acp a0) -> -- region 6 or 5
-                if (isSameDirection ac a0) then (False, ([a,c], acp)) else (False, ([a], a0)) 
-            | otherwise -> (True, ([b,c], a0)) 
-
-
-
-
+                if (isSameDirection ac a0) then (False, ([a,c], acp)) else (False, ([a], a0))
+            | otherwise -> (True, ([b,c], a0))
